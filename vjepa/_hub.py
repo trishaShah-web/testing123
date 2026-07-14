@@ -33,4 +33,7 @@ def load_vjepa2_vitl(pretrained: bool = True):
     download/build so VJEPAEncoder and VJEPAWorldModel don't each trigger
     their own copy of the checkpoint fetch.
     """
-    return torch.hub.load("facebookresearch/vjepa2", "vjepa2_vit_large", pretrained=pretrained)
+    return torch.hub.load(
+        "facebookresearch/vjepa2", "vjepa2_vit_large",
+        pretrained=pretrained, trust_repo=True,
+    )

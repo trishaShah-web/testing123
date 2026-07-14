@@ -38,7 +38,7 @@ from vjepa.masking import apply_masks, build_temporal_split_masks
 from overseer import SemanticAnchor, compute_drift, apply_steering
 from arms import RawController, BlindController
 
-NUM_FRAMES = 64
+NUM_FRAMES = 16
 NUM_TEMPORAL_BLOCKS = NUM_FRAMES // 2
 NUM_SPATIAL_PATCHES = (256 // 16) ** 2
 

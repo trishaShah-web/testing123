@@ -39,6 +39,20 @@ they are documented decisions, not silent edits.
    requires sign-off and a training budget the current timeline does not have.
 5. **An audit-only fallback is defined.** If the Day-2 spike fails, the project ships
    as a measurement paper (identity leaks into the rollout) with no intervention.
+6. **Input clip length is 16 frames, not the checkpoint's native 64-frame (fpc64)
+   config.** `steering.phase_length` (configs/base.yaml) = T = 16 raw frames every
+   clip — target and reference alike — is resampled to before encoding (Devanshi
+   Kashyap, `scripts/smoke_test_two_clips.py`, 2026-07-14; confirmed working on
+   Kaggle same day). The checkpoint in use is still `facebook/vjepa2-vitl-fpc64-256`
+   (ARCHITECTURE.md component 1) — its name reflects its *training* config (64
+   frames-per-clip), not a hard requirement we've independently verified at
+   inference time. Whether the frozen encoder/predictor's positional embeddings
+   behave correctly on a 16-frame input (8 temporal blocks instead of the
+   source-verified 32, `vjepa/masking.py`) has not been checked against primary
+   source the way the 64-frame case was — it empirically ran without a shape
+   error, which is evidence it's *plumbing-compatible*, not confirmation the
+   predictions are meaningful at this length. Flagged as an open technical risk,
+   not a resolved one.
 
 ---
 

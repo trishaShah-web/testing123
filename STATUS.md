@@ -90,9 +90,17 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   reference clip, not a real pooled Semantic Anchor; do not cite these
   numbers as a result.
 - Phase alignment decided (2026-07-14): `steering.phase_length = 16`
-  (target-region temporal blocks, not raw frames — reuses the existing
-  64-frame-encode / 32-block / 16-block-target shape already in the
-  pipeline) and resample method = uniform full-span index subsampling,
+  RAW FRAMES — the fixed length every clip (target and reference alike) is
+  resampled to before encoding, matching `SemanticAnchor.phase_length`'s
+  own docstring and Devanshi Kashyap's `NUM_FRAMES=16` in
+  `scripts/smoke_test_two_clips.py` (confirmed working on Kaggle same day).
+  This deviates from the `vjepa2-vitl-fpc64-256` checkpoint's native
+  64-frame training config — see AGENT.md DEVIATIONS #6: whether the
+  frozen encoder/predictor behaves correctly on a 16-frame input (8
+  temporal blocks, not the source-verified 32) is an open technical risk,
+  not a resolved fact — it ran without a shape error, which is
+  plumbing-compatible, not confirmation the predictions are meaningful at
+  this length. Resample method = uniform full-span index subsampling,
   applied **deterministically**. Fixed a real bug found in the process:
   `VideoDataset._load_clip`'s random start-offset crop would have averaged
   unaligned action phases across performers; added an opt-in

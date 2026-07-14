@@ -13,17 +13,24 @@ target-region latents into one SemanticAnchor.
 Phase alignment (configs/base.yaml steering.phase_length=16, decided
 2026-07-14): every reference clip is loaded with
 VideoDataset(deterministic=True) — uniform full-span index subsampling, NOT
-the random-crop default — so frame i/64 lands at the same fraction of each
+the random-crop default — so frame i/16 lands at the same fraction of each
 clip's real duration across performers. Random start offsets would average
 unaligned action phases together, which would make the anchor scientifically
 meaningless. See data/video_dataset.py for the deterministic-mode
 implementation.
 
-phase_length=16 is measured in target-region TEMPORAL BLOCKS (not raw
-frames): every clip is resampled to the encoder's fixed 64-frame input,
-giving 32 temporal blocks (tubelet_size=2); the existing context/target
-split takes the second half -> 16 blocks. This reuses that shape rather than
-introducing a separate resampling target.
+phase_length=16 is the RAW FRAME count every clip (target and reference
+alike) is resampled to — matches SemanticAnchor.phase_length's own
+docstring ("T: fixed length every reference clip was resampled to",
+overseer/semantic_anchor.py) and scripts/smoke_test_two_clips.py's
+NUM_FRAMES=16. This is a deviation from the vjepa2-vitl-fpc64-256
+checkpoint's native 64-frame training config (AGENT.md DEVIATIONS #6) —
+whether the frozen encoder/predictor behaves correctly on a 16-frame input
+(different temporal-block count, different positional-embedding
+interpolation) has NOT been re-verified against source the way the
+64-frame case was (vjepa/masking.py). Kept because
+scripts/smoke_test_two_clips.py ran successfully with it on Kaggle
+2026-07-14, but treat this as a real open technical risk, not a settled fact.
 
 Camera view: pooling across camera angles would mix "viewpoint" variation
 into the anchor alongside performer identity, which the anchor is supposed
@@ -54,10 +61,13 @@ from vjepa import VJEPAEncoder
 from vjepa.masking import apply_masks, build_temporal_split_masks
 from overseer import SemanticAnchor
 
-NUM_FRAMES = 64
+NUM_FRAMES = 16  # = steering.phase_length (configs/base.yaml) = T. Matches
+                 # scripts/smoke_test_two_clips.py's NUM_FRAMES; see module
+                 # docstring — deviates from the checkpoint's native 64-frame
+                 # (fpc64) config, AGENT.md DEVIATIONS #6.
 NUM_TEMPORAL_BLOCKS = NUM_FRAMES // 2
 NUM_SPATIAL_PATCHES = (256 // 16) ** 2
-PHASE_LENGTH = NUM_TEMPORAL_BLOCKS // 2  # 16 — matches configs/base.yaml steering.phase_length
+PHASE_LENGTH = NUM_FRAMES  # T itself — the raw resample length, per SemanticAnchor.phase_length's docstring
 
 
 def main() -> None:

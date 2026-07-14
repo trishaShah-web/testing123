@@ -51,21 +51,25 @@ overseer:
 
 # Steering (overseer/semantic_anchor.py, overseer/guidance_vector.py).
 steering:
-  # decided 2026-07-14: T=16, units = temporal blocks in the TARGET-region
-  # latent (not raw frames). Every clip (target or reference) is already
-  # resampled to the encoder's fixed 64-frame input (vjepa/_hub.py
-  # fpc64-256), giving 32 temporal blocks (tubelet_size=2); the existing
-  # context/target split (vjepa/masking.py build_temporal_split_masks)
-  # takes the second half -> 16 blocks. T=16 reuses that shape rather than
-  # inventing a new one, so every reference clip's real target-region
-  # latent is directly poolable/averageable with no extra shape-matching
-  # step. Resample method: uniform full-span index subsampling, applied
-  # deterministically (data/video_dataset.py VideoDataset(deterministic=
-  # True)) so frame i/64 lands at the same fraction of each clip's real
-  # duration — a random start-offset crop (the existing default for
-  # non-anchor clips) would break cross-performer phase alignment. DTW-based
-  # alignment remains a stretch goal (ARCHITECTURE.md component 4), not
-  # implemented.
+  # decided 2026-07-14: T=16, units = RAW FRAMES. This is the fixed length
+  # every clip (target and reference alike) is resampled to before encoding
+  # — matches SemanticAnchor.phase_length's own docstring ("T: fixed length
+  # every reference clip was resampled to", overseer/semantic_anchor.py)
+  # and scripts/smoke_test_two_clips.py's NUM_FRAMES=16 (Devanshi Kashyap,
+  # confirmed working on Kaggle 2026-07-14). This deviates from the
+  # vjepa2-vitl-fpc64-256 checkpoint's native 64-frame training config —
+  # see AGENT.md DEVIATIONS #6: whether the frozen encoder/predictor
+  # behaves correctly on a 16-frame input (8 temporal blocks, not the
+  # source-verified 32) is an open technical risk, not yet re-verified
+  # against primary source; it ran without a shape error, which is
+  # plumbing-compatible, not confirmation the predictions are meaningful
+  # at this length. Resample method: uniform full-span index subsampling,
+  # applied deterministically (data/video_dataset.py
+  # VideoDataset(deterministic=True)) so frame i/16 lands at the same
+  # fraction of each clip's real duration — a random start-offset crop
+  # (the existing default for non-anchor clips) would break cross-performer
+  # phase alignment. DTW-based alignment remains a stretch goal
+  # (ARCHITECTURE.md component 4), not implemented.
   phase_length: 16
   blind_alpha: null                # TODO: fixed alpha for the Blind arm (arms/blind.py); not yet chosen
 

@@ -60,6 +60,9 @@ Input Video
 
 ### 1. Frozen V-JEPA Encoder
 Frames -> observed latent tokens. Frozen. Decision: ViT-L (`facebook/vjepa2-vitl-fpc64-256`).
+Checkpoint name reflects its 64-frame training config; the project currently feeds it
+16-frame clips instead (AGENT.md DEVIATIONS #6) — an open technical risk, not yet
+verified against primary source at this input length.
 
 ### 2. Frozen V-JEPA World Model (predictor)
 Masks future tokens, predicts them from observed context. Frozen. Rollout length is a

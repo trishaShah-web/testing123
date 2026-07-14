@@ -207,6 +207,36 @@ results built on it. Merged via `fadda28`, pushed to `origin/main`
 `github.com/trishaShah-web/testing123.git` — push succeeded via redirect,
 remote URL not yet updated).
 
+**11. Item 8's reasoning corrected — item 10's flag resolved (2026-07-14,
+same session).** Re-read `SemanticAnchor.phase_length`'s own docstring
+(`overseer/semantic_anchor.py`): `# T: fixed length every reference clip
+was resampled to`. That's the RAW FRAME count, not a target-region
+temporal-block count — item 8 above was wrong about the units (it matched
+16 to "target-region blocks" only because the *original* smoke-test code's
+`phase_length=NUM_TEMPORAL_BLOCKS - NUM_TEMPORAL_BLOCKS//2` formula
+happened to equal 16 when `NUM_FRAMES` was still 64; that formula was
+itself inconsistent with the dataclass field's documented meaning). Correct
+reading: `steering.phase_length=16` and Devanshi's `NUM_FRAMES=16` are the
+SAME quantity, not a conflict — resolves item 10's flag. Fixed
+`scripts/build_semantic_anchor.py` to use `NUM_FRAMES=16` (was still
+hardcoded 64, inconsistent with `smoke_test_two_clips.py` after the merge)
+and `PHASE_LENGTH = NUM_FRAMES` directly (was the wrong
+temporal-block-count formula). Updated `configs/base.yaml`,
+`ARCHITECTURE.md` component 1, and `STATUS.md` to match. Added
+**AGENT.md DEVIATIONS #6**: input clip length is 16 frames, not the
+`vjepa2-vitl-fpc64-256` checkpoint's native 64-frame training config — this
+is the real remaining open question (not the units confusion, which is now
+resolved), since whether the frozen encoder/predictor's positional
+embeddings behave correctly on a 16-frame input (8 temporal blocks, not the
+source-verified 32) has not been checked against primary source. It ran
+without a shape error on Kaggle, which is plumbing-compatible, not
+confirmation the predictions are meaningful at this length — flagged for
+sign-off, not silently accepted as correct.
+`scripts/smoke_test_single_clip.py` still hardcodes `NUM_FRAMES=64` and
+was NOT changed (it doesn't use `SemanticAnchor`/`phase_length` at all, so
+it's an independent script, but it's now the only place in the repo still
+exercising the original 64-frame path — worth the team noting).
+
 ## Known unverified assumptions (check these first if something breaks)
 
 1. **Tensor layout into `VJEPAEncoder.forward()`.** Both smoke-test scripts

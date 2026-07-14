@@ -1,0 +1,14 @@
+torch
+torchvision
+torchcodec
+timm            # required by facebookresearch/vjepa2 hubconf.py to build encoder/predictor
+einops          # required by facebookresearch/vjepa2 hubconf.py to build encoder/predictor
+pyyaml
+ollama
+numpy
+tqdm
+
+# peft was only needed by the LoRA-Fine-Tuned baseline
+# (arms/_pending_signoff/lora_finetuned_vjepa.py), which is dropped from the
+# current 7-day scope pending sign-off (AGENT.md DEVIATIONS #4). Re-add if
+# that arm is reinstated.

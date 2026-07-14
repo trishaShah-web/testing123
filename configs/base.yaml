@@ -1,0 +1,66 @@
+# Zero-Shot Semantic Steering for Video World Models — base experiment config
+# Only engineering/plumbing values live here (paths, model names, seeds).
+# Scientific unknowns (phase length, blind alpha, PCA reference set, etc.)
+# are intentionally left null/TODO here until they are specified — see
+# INSTRUCTIONS.md "Documented-Decision Rules". A value present here (not
+# null) is a documented decision, defended in ARCHITECTURE.md/AGENT.md; a
+# null is a genuinely open unknown, not an invented default.
+
+seed: 42
+
+paths:
+  # decided (verified against facebookresearch/vjepa2 source, 2026-07-13 —
+  # not yet execution-tested, see STATUS.md): loaded via
+  # torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_large',
+  # pretrained=True), which returns (encoder, predictor) from ONE
+  # checkpoint. This is the same weights as facebook/vjepa2-vitl-fpc64-256
+  # on HuggingFace, but the HF `transformers.AutoModel` path only exposes
+  # encoder features with no documented way to get the predictor (world
+  # model) — so torch.hub, not AutoModel, is the loading path used by
+  # vjepa/encoder.py and vjepa/world_model.py. No local path needed; kept
+  # here as an override slot for a future local checkpoint (unused for now).
+  vjepa_checkpoint: null
+  output_dir: experiments/
+
+datasets:
+  ntu_rgbd:
+    root: null                 # TODO: path once download completes
+    split: null                 # TODO: not specified by project definition
+  something_something_v2:
+    root: null                 # TODO: path once download completes; secondary/if-time (STATUS.md UNKNOWN)
+    split: null
+  ucf101:
+    root: null                 # TODO: path once download completes
+    split: null
+
+vjepa:
+  version: vjepa2                          # decided: official Meta V-JEPA 2 repo
+  variant: vitl-fpc64-256                  # decided: ViT-L (ARCHITECTURE.md component 1)
+  device: cuda                             # TODO: confirm available hardware
+  rollout_steps: null                      # TODO: not specified by project definition (STATUS.md UNKNOWN); autoregressive chaining is a stretch goal, not assumed
+
+# Experimental arms — AGENT.md "Baselines / experimental arms". Exactly
+# three in current scope; LoRA-Fine-Tuned and Prompt-Conditioned are dropped
+# pending sign-off (arms/_pending_signoff/, AGENT.md DEVIATIONS #4).
+arms: [raw, blind, llm]
+
+overseer:
+  backend: ollama                  # decided: local open-weight LLM via Ollama
+  model_name: null                 # TODO: not specified by project definition — pick e.g. "llama3", "qwen2.5"
+  host: http://localhost:11434
+
+# Steering (overseer/semantic_anchor.py, overseer/guidance_vector.py).
+steering:
+  phase_length: null               # TODO: fixed length T every reference clip is resampled to (ARCHITECTURE.md component 4); not yet chosen
+  blind_alpha: null                # TODO: fixed alpha for the Blind arm (arms/blind.py); not yet chosen
+
+# Latent-based visualization (ARCHITECTURE.md component 7b/7c). No pixel
+# decoder exists anywhere in this project.
+visualization:
+  nn_retrieval:
+    distance_metric: null          # TODO: not specified by project definition
+  pca_overlay:
+    reference_set: null            # TODO: fixed reference set the shared PCA basis is fit on; not yet chosen. Must be fit ONCE and reused across Raw/Blind/LLM (hard constraint, INSTRUCTIONS.md).
+
+evaluation:
+  metrics: [scs, ids, pcs]        # all three are mandatory for every experiment — see evaluation/report.py

@@ -188,6 +188,25 @@ real project code (not just eyeballed):
   agreement is research-only / no-redistribution, so this Kaggle dataset
   should be created as **Private**, not Public.
 
+**10. Synced with teammate's commits (2026-07-14).** Pulled + merged two
+commits from Devanshi Kashyap (`origin/main`): `vjepa/_hub.py` now passes
+`trust_repo=True` to `torch.hub.load` (avoids an interactive trust prompt
+hanging non-interactive environments like Kaggle — no conflict). Also
+`scripts/smoke_test_two_clips.py`'s `NUM_FRAMES` changed from 64 to 16 —
+user confirmed this is intentional/crucial, not a mistake. **Flagging, not
+resolving**: this was not reconciled against today's `configs/base.yaml`
+`steering.phase_length=16` decision, whose documented reasoning explicitly
+assumed clips still enter the encoder at the full 64-frame `fpc64` input
+(with 16 being the downstream target-region latent block count, a
+different quantity). If the encoder is now actually fed 16 raw frames, the
+`vitl-fpc64-256` checkpoint's positional embeddings (verified/documented
+for 64 frames) may not behave as documented — needs reconciliation with
+Devanshi on what NUM_FRAMES=16 means architecturally before trusting
+results built on it. Merged via `fadda28`, pushed to `origin/main`
+(GitHub reported the repo moved to
+`github.com/trishaShah-web/testing123.git` — push succeeded via redirect,
+remote URL not yet updated).
+
 ## Known unverified assumptions (check these first if something breaks)
 
 1. **Tensor layout into `VJEPAEncoder.forward()`.** Both smoke-test scripts

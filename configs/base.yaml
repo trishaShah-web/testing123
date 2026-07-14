@@ -71,7 +71,14 @@ steering:
   # phase alignment. DTW-based alignment remains a stretch goal
   # (ARCHITECTURE.md component 4), not implemented.
   phase_length: 16
-  blind_alpha: null                # TODO: fixed alpha for the Blind arm (arms/blind.py); not yet chosen
+  # decided 2026-07-14: blind_alpha=0.3. Matches the value already used
+  # informally as scripts/smoke_test_two_clips.py's --blind-alpha default,
+  # which produced a visible, non-exploding move toward the reference
+  # performer's real future encoding in the confirmed-working two-clip run
+  # (||steered-predicted||=898.91). A moderate, conservative fixed nudge —
+  # not re-derived from a search, an explicit documented decision per
+  # INSTRUCTIONS.md "Documented-Decision Rules", open to revision.
+  blind_alpha: 0.3
 
 # Latent-based visualization (ARCHITECTURE.md component 7b/7c). No pixel
 # decoder exists anywhere in this project.

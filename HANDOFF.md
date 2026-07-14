@@ -251,25 +251,79 @@ exercising the original 64-frame path — worth the team noting).
    STATUS.md as "verified by reading the real source code," not "confirmed
    working."
 
+**12. IDS/SCS probes implemented + Day-2 spike script written (2026-07-14,
+same session).** Anchor building confirmed working for real
+(`anchor_A015.pt`, 3 reference clips, action "take off jacket") — step 2 of
+the plan below is done.
+- `evaluation/probes.py` (new): shared linear-probe utilities —
+  `LabelEncoder` (raw NTU IDs -> contiguous class indices), `pool_latent`
+  (mean-pool token sequence -> one feature vector), `LinearProbe`
+  (`nn.Linear(embed_dim, num_classes)`, the documented simple architecture),
+  `train_linear_probe` (full-batch Adam + cross-entropy, CPU, no GPU
+  contention), `probe_accuracy`. Sanity-tested standalone with synthetic
+  separable data (100% train accuracy) before wiring into anything.
+- `evaluation/ids.py` / `evaluation/scs.py`: implemented (were
+  `NotImplementedError` stubs). Both now take an already-trained
+  `LinearProbe` — training and scoring the same example in one call would
+  leak it into its own training set, so probe training is a separate step
+  the caller (the spike script) owns.
+- `configs/base.yaml` `steering.blind_alpha` set to **0.3** (was `null`) —
+  matches the value already informally used in
+  `scripts/smoke_test_two_clips.py`'s `--blind-alpha` default.
+- `scripts/build_semantic_anchor.py`: added `torch.cuda.empty_cache()`
+  between each reference clip's encode (was missing — likely part of why
+  OOMs happened today) and now saves `reference_paths`/`action`/`camera` in
+  the output `.pt` file, so downstream scripts can exclude the anchor's
+  exact source clips from probe training. **`anchor_A015.pt` was built
+  before this fix and has no `reference_paths`** — the spike script falls
+  back to a heuristic exclusion for it (same action, performer != target's,
+  same camera) with a printed warning; rebuild the anchor with the current
+  script for exact provenance.
+- New `scripts/spike_blind_vs_raw.py`: the actual Day-2 gate script. Loads
+  one target clip, runs `predict_future` once, applies Raw/Blind steering
+  to that one predicted latent, scores each arm with IDS/SCS using probes
+  trained on a small (~24-clip) held-out set — target clip's own action + 5
+  filler actions (pickup, kicking, jump up, sitting down, drink water) × all
+  4 performers × the target's own camera, with the anchor's reference clips
+  and the target clip itself excluded. Prints a class-balance summary
+  (flags classes with <2 surviving examples) and a Raw-vs-Blind comparison
+  table, then the gate condition (IDS dropped AND SCS held).
+  **Verified via an offline dry run** (real dataset, real anchor file, real
+  leakage/probe-training logic — only the GPU encoder/predictor mocked with
+  random tensors of the correct shape, since this machine has no CUDA and a
+  real run would trigger a multi-GB checkpoint download): ran end to end
+  without error. The dry run also concretely surfaced the class-thinness
+  risk flagged during design — for A015, performer P7 ended up with 0
+  surviving training examples (both its replications had fed the anchor)
+  while the other 3 performers had 1 each; the class-balance printout
+  caught this correctly rather than hiding it. **Not yet run for real** —
+  needs a GPU (Kaggle).
+
 ## Where things stand right now / next steps
 
-- **Two-clip smoke test CONFIRMED WORKING** (2026-07-14, Kaggle) — see
-  session summary item 7. Step (1) of the order below is done.
-- **Immediate next step**: do NOT jump to the LLM. Order is: (1) DONE —
-  confirm the two-clip smoke test works, (2) build a *real* Semantic Anchor
-  from a pool of clips (not the current one-clip degenerate version) — this
-  needs the phase-alignment/resampling utility (does not exist yet, see
-  below), (3) validate Raw vs. Blind on that real anchor (this is the Day-2
-  spike gate), (4) only then wire up the LLM (Job 1/Job 2 in
-  `overseer/llm_overseer.py`, both still `NotImplementedError`).
+- **Real anchor building CONFIRMED WORKING** (2026-07-14) —
+  `anchor_A015.pt`. Step (2) below is done.
+- **IDS/SCS implemented, `scripts/spike_blind_vs_raw.py` written and
+  dry-run-verified but NOT yet run for real** (needs GPU/Kaggle) — step (3)
+  is code-complete, execution-pending.
+- **Order**: (1) DONE — two-clip smoke test. (2) DONE — real pooled
+  Semantic Anchor. (3) NEXT — actually run `spike_blind_vs_raw.py` on
+  Kaggle against `anchor_A015.pt` (or a freshly-rebuilt one with
+  `reference_paths`) and read the real IDS/SCS numbers; the script's own
+  printed caveat applies — one target clip is one data point, not a
+  verdict, run it across a few target clips (different target performers,
+  same action) before trusting a green/red call. (4) only then wire up the
+  LLM (Job 1/Job 2 in `overseer/llm_overseer.py`, both still
+  `NotImplementedError`).
 - **Still untouched stubs**: `data/something_something_v2.py`,
   `data/ucf101.py`, `overseer/llm_overseer.py` (Job1/Job2 prompt logic),
-  `evaluation/ids.py|scs.py|pcs.py` (probe architecture), and
-  `visualization/nn_retrieval.py|pca_overlay.py`.
-- **Phase-alignment/resampling utility does not exist yet** — needed to
-  turn a pool of same-action clips (possibly different lengths/framerates)
-  into the fixed-length reference set `SemanticAnchor.from_reference_clips`
-  expects. This is required before step 2 above.
+  `evaluation/pcs.py`, and `visualization/nn_retrieval.py|pca_overlay.py`.
+- **Known limitation to watch**: probe training data comes from the same
+  small local NTU subset the anchor is built from, so as more actions/
+  performers get consumed by anchors, individual probe classes can end up
+  thin (see the P7/A015 case above) — the spike script's class-balance
+  printout is the guard, but a genuinely robust probe eventually wants a
+  larger, disjoint labeled pool.
 
 ## Exact commands reference
 

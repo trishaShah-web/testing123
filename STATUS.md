@@ -121,6 +121,18 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   variation; `scripts/build_semantic_anchor.py` uses the target clip's own
   camera by default. `dataset-metadata.json` written into the local folder
   for `kaggle datasets create`.
+- Real Semantic Anchor built successfully (`anchor_A015.pt`, 3 reference
+  clips, action "take off jacket") — the actual pooled anchor, not the
+  smoke test's one-clip stand-in.
+- IDS + SCS implemented (`evaluation/ids.py`, `evaluation/scs.py`, new
+  `evaluation/probes.py`): external, read-only linear probes
+  (`nn.Linear(embed_dim, num_classes)`, mean-pooled latent tokens — a
+  documented decision) trained on a small held-out labeled set, top-1
+  accuracy reported against chance. `steering.blind_alpha` decided: 0.3.
+  New `scripts/spike_blind_vs_raw.py` runs the actual Day-2 gate
+  comparison for one target clip; dry-run-verified (real dataset/anchor/
+  probe-training logic, GPU encoder/predictor mocked) but not yet run for
+  real — needs Kaggle GPU.
 
 ### IN PROGRESS
 - Actual Kaggle upload: `dataset-metadata.json`'s `id` field needs the
@@ -129,19 +141,23 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   `kaggle datasets create -p ~/Downloads/nturgb+d_rgb`. Should be created
   **Private** — NTU RGB+D's usage agreement is research-only, no
   redistribution.
+- Running `scripts/spike_blind_vs_raw.py` for real (needs GPU) and reading
+  actual IDS/SCS numbers — this is the literal Day-2 gate check.
 
 ### NOT STARTED
 - data curation (NTU subset, UCF101) + Kaggle dataset upload; dataset index
   builders are still TODO stubs
 - LLM Overseer Job 1 (`build_target`) and Job 2 (`schedule_correction`)
   prompt templates — interfaces exist, prompting logic is TODO
-- Blind arm alpha value, PCA reference set (all TODO in configs/base.yaml —
-  genuinely open, not invented; phase length T is now decided, see
-  COMPLETED above)
-- IDS/SCS/PCS probes (interfaces exist, probe architecture is TODO)
+- PCA reference set (still TODO in configs/base.yaml — genuinely open, not
+  invented; phase length T and blind_alpha are now decided, see COMPLETED
+  above)
+- PCS (interfaces exist, delta-comparison method is TODO — IDS/SCS are now
+  implemented, PCS is not)
 - NN retrieval + PCA overlay implementations (interfaces exist, distance
   metric / reference set / rendering are TODO)
-- **Day-2 spike (GATE)**
+- **Day-2 spike (GATE)** — script exists and is dry-run-verified, but has
+  not been executed for real yet
 - three-arm experiment, ablation (alpha)
 - figures, writing
 
@@ -150,8 +166,8 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
 - final probe architecture details
 - whether SSv2 makes the timeline
 - Ollama model choice (`overseer.model_name`)
-- Blind arm's fixed alpha, PCA reference set (phase-alignment length T is
-  now decided — 16 — see COMPLETED above)
+- PCA reference set (phase-alignment length T and Blind arm's fixed alpha
+  are now decided — 16 and 0.3 — see COMPLETED above)
 
 ---
 
@@ -164,16 +180,19 @@ Blind averaging, re-measure. Green if IDS drops and SCS holds. If red, pivot to
 NTU RGB+D 120 (curated subset), Something-Something v2 (subset, if time), UCF101.
 Nothing downloaded, curated, or uploaded yet.
 
-## Arms — scaffolded, NOT IMPLEMENTED
+## Arms — Raw + Blind IMPLEMENTED, LLM NOT IMPLEMENTED
 Raw (`arms/raw.py`, alpha=0 — implemented, trivial), Blind (`arms/blind.py`,
-fixed alpha — implemented, but `steering.blind_alpha` is still unset),
-LLM (`arms/llm.py`, scheduled alpha — delegates to `LLMOverseer.schedule_correction`,
+fixed alpha=0.3 — implemented, `steering.blind_alpha` now set), LLM
+(`arms/llm.py`, scheduled alpha — delegates to `LLMOverseer.schedule_correction`,
 which is still TODO).
 (Dropped pending sign-off: LoRA-Fine-Tuned, Prompt-Conditioned — see
 `arms/_pending_signoff/README.md`.)
 
-## Metrics — defined, NOT IMPLEMENTED
-IDS (performer probe), SCS (action probe), PCS (latent-delta vs real). All on latents.
+## Metrics — IDS + SCS IMPLEMENTED, PCS NOT IMPLEMENTED
+IDS (performer probe) and SCS (action probe): implemented, `evaluation/probes.py`
+(linear probe, mean-pooled latent tokens, trained on a small held-out labeled set —
+see `scripts/spike_blind_vs_raw.py`). PCS (latent-delta vs real): still
+`NotImplementedError`, delta comparison method not chosen. All on latents.
 
 ## Experiments — none run. No benchmarks, ablations, or results exist.
 

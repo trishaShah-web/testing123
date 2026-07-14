@@ -139,10 +139,14 @@ def main() -> None:
     for record in records:
         clip = dataset._load_clip(record.path)  # (T, C, H, W), deterministic full-span sampling
         frames = clip.permute(1, 0, 2, 3).unsqueeze(0).to(device)  # UNVERIFIED layout guess, same as smoke tests
-        encoded = encoder(frames)
-        real_target = apply_masks(encoded, [masks_y])  # real, not predicted
-        reference_latents.append(real_target.squeeze(0))
+        with torch.no_grad():
+            encoded = encoder(frames)
+            real_target = apply_masks(encoded, [masks_y]).squeeze(0).cpu()  # real, not predicted
+        reference_latents.append(real_target)
         print(f"  encoded {record.path.name} (performer {record.performer})")
+        del clip, frames, encoded
+        if device == "cuda":
+            torch.cuda.empty_cache()  # one clip's activations at a time — we've OOM'd on this loop before
 
     anchor = SemanticAnchor.from_reference_clips(
         action_label=records[0].action_label,
@@ -160,6 +164,12 @@ def main() -> None:
                 "latent": anchor.latent,
                 "phase_length": anchor.phase_length,
                 "num_reference_clips": anchor.num_reference_clips,
+                # provenance, for downstream leakage exclusion (e.g.
+                # scripts/spike_blind_vs_raw.py probe training must not
+                # train on the exact clips that fed this anchor):
+                "reference_paths": [str(r.path) for r in records],
+                "action": action,
+                "camera": camera,
             },
             args.output,
         )

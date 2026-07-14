@@ -109,6 +109,85 @@ me — no runtime environment available in this session):
 
 ---
 
+**7. Two-clip smoke test executed successfully on Kaggle (2026-07-14).**
+Real run, two NTU clips (same action, different performers):
+- `drift d = 1 - cos(predicted, anchor) = 0.5049` (cos_sim ≈ 0.495, ~60°
+  apart) — moderate divergence, consistent with "related action, different
+  performer," not identical and not random.
+- Raw arm (`alpha=0.000`): `||steered-predicted|| = 0.0000` — correct by
+  construction.
+- Blind arm (`alpha=0.300`): `||steered-predicted|| = 898.9101` — nonzero,
+  correct direction of movement toward the reference clip's real future
+  encoding. (Implies `||anchor-predicted|| ≈ 2996.4`; this raw norm is not
+  itself meaningful — V-JEPA latents are not unit-normalized, so only
+  cosine-based drift and the later IDS/SCS/PCS metrics carry scientific
+  weight.)
+- **Conclusion**: the encoder -> predictor -> drift -> steer chain is now
+  CONFIRMED WORKING end-to-end (not merely source-verified). Still only a
+  plumbing check — anchor was a single reference clip (degenerate), not a
+  real pooled Semantic Anchor. Do not cite these numbers as a result.
+- Tensor layout assumption `(1, C, T, H, W)` (see unverified assumption #1
+  below) evidently worked — no shape-mismatch error. Downgrading from
+  "unverified" to "confirmed correct" for this checkpoint/predictor path.
+
+**8. Phase-alignment decisions made + real anchor-pool builder written
+(2026-07-14, same session as item 7).**
+- `steering.phase_length` decided: **16**, units = target-region temporal
+  blocks (not raw frames) — every clip is still resampled to the encoder's
+  fixed 64-frame input (32 temporal blocks), and the existing context/target
+  mask split already takes the second half (16 blocks); this reuses that
+  shape rather than inventing a new one. Documented in `configs/base.yaml`.
+- Resample method decided: uniform full-span index subsampling, applied
+  **deterministically** — found and fixed a real phase-alignment bug in the
+  process: `VideoDataset._load_clip` used a *random* start offset
+  (`torch.randint`) when a clip is longer than needed, which is fine for a
+  single smoke-test clip but would silently break anchor pooling (each
+  reference clip's window would land at an arbitrary, unaligned point in the
+  action, making cross-performer averaging meaningless). Fixed via a new
+  opt-in `deterministic=True` constructor flag on `VideoDataset`
+  (`data/video_dataset.py`) that uses `torch.linspace(0, total-1,
+  num_frames)` instead — full clip span, evenly spaced, no randomness.
+  Default (`deterministic=False`) is unchanged, so the two already-confirmed
+  smoke test scripts are unaffected.
+- New `scripts/build_semantic_anchor.py`: pools every other-performer clip
+  for a given NTU action via `NTURGBDDataset.clips_for_action`, loads each
+  with `deterministic=True`, encodes, extracts the REAL (not predicted)
+  target-region latent, and calls `SemanticAnchor.from_reference_clips`.
+  This is the actual "step 2" from the prior session's plan. **Not yet
+  execution-tested** — no real pool of other-performer clips is uploaded to
+  Kaggle yet (only the two smoke-test clips exist there so far); this is
+  next.
+
+**9. NTU RGB+D data audited + prepared for Kaggle upload (2026-07-14).**
+User has `~/Downloads/nturgb+d_rgb/` locally: 1440 clips, setup S004 only, 4
+performers (P003, P007, P008, P020), 3 camera views (C001-C003), 2
+replications, 60 actions (A001-A060), 5.5GB total. Verified against the
+real project code (not just eyeballed):
+- All 1440 filenames parse correctly via `parse_ntu_filename` (0 unparsed).
+- `NTURGBDDataset(root=..., deterministic=True).clips_for_action(13,
+  exclude_performer=3)` returns a real 18-clip pool end to end.
+- **Found + fixed a second methodological gap**: `clips_for_action` had no
+  way to control camera view, so pooling would mix all 3 camera angles
+  into the anchor — conflating "viewpoint" drift with "performer identity"
+  drift, which the anchor is supposed to isolate from. Added an optional
+  `camera` filter param to `clips_for_action` (`data/ntu_rgbd.py`).
+- `scripts/build_semantic_anchor.py` updated: now restricts the reference
+  pool to the target clip's own camera by default (opt out with
+  `--all-cameras`), and added `--target-clip` to infer
+  action/exclude_performer/camera straight from a clip's filename instead
+  of specifying each by hand.
+- No file reorganization needed — filenames already match
+  `SsssCcccPpppRrrrAaaa` exactly, so the folder can be pointed at directly
+  as `ntu_root`. Wrote `dataset-metadata.json` into
+  `~/Downloads/nturgb+d_rgb/` (kaggle CLI's required manifest for
+  `kaggle datasets create -p <folder>`) — `id` field has a placeholder
+  `REPLACE_WITH_YOUR_KAGGLE_USERNAME`, not yet filled in (don't know the
+  user's Kaggle username). **Not yet uploaded** — needs the user's Kaggle
+  CLI + credentials, which this session doesn't have.
+- Flagged for the user, not yet confirmed: NTU RGB+D's own usage
+  agreement is research-only / no-redistribution, so this Kaggle dataset
+  should be created as **Private**, not Public.
+
 ## Known unverified assumptions (check these first if something breaks)
 
 1. **Tensor layout into `VJEPAEncoder.forward()`.** Both smoke-test scripts
@@ -125,15 +204,15 @@ me — no runtime environment available in this session):
 
 ## Where things stand right now / next steps
 
-- **Immediate**: get `scripts/smoke_test_two_clips.py` to run successfully
-  (`PYTHONPATH=. python scripts/smoke_test_two_clips.py <target> <reference>`).
-  This was mid-troubleshooting when this file was written.
-- **After that passes**: do NOT jump to the LLM. Order is: (1) confirm the
-  two-clip smoke test works, (2) build a *real* Semantic Anchor from a pool
-  of clips (not the current one-clip degenerate version), (3) validate
-  Raw vs. Blind on that real anchor (this is the Day-2 spike gate), (4) only
-  then wire up the LLM (Job 1/Job 2 in `overseer/llm_overseer.py`, both
-  still `NotImplementedError`).
+- **Two-clip smoke test CONFIRMED WORKING** (2026-07-14, Kaggle) — see
+  session summary item 7. Step (1) of the order below is done.
+- **Immediate next step**: do NOT jump to the LLM. Order is: (1) DONE —
+  confirm the two-clip smoke test works, (2) build a *real* Semantic Anchor
+  from a pool of clips (not the current one-clip degenerate version) — this
+  needs the phase-alignment/resampling utility (does not exist yet, see
+  below), (3) validate Raw vs. Blind on that real anchor (this is the Day-2
+  spike gate), (4) only then wire up the LLM (Job 1/Job 2 in
+  `overseer/llm_overseer.py`, both still `NotImplementedError`).
 - **Still untouched stubs**: `data/something_something_v2.py`,
   `data/ucf101.py`, `overseer/llm_overseer.py` (Job1/Job2 prompt logic),
   `evaluation/ids.py|scs.py|pcs.py` (probe architecture), and

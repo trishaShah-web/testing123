@@ -36,11 +36,22 @@ class VideoDataset(Dataset):
         num_frames: int = 16,
         frame_stride: int = 1,
         transform: Optional[Callable] = None,
+        deterministic: bool = False,
     ):
         self.root = Path(root) if root is not None else None
         self.num_frames = num_frames
         self.frame_stride = frame_stride
         self.transform = transform
+        # deterministic=True: uniform full-span sampling (evenly spaced
+        # indices across the WHOLE clip, no random crop). Required for
+        # Semantic Anchor reference clips (ARCHITECTURE.md component 4,
+        # phase alignment: STATUS.md-documented decision, resample via
+        # uniform index subsampling) — a random start offset would land
+        # each reference clip's sampled window at an arbitrary, unaligned
+        # point in the action, making cross-performer averaging meaningless.
+        # Default is False (existing random-crop behavior, unchanged) since
+        # it is not a phase-alignment concern for a single non-anchor clip.
+        self.deterministic = deterministic
         self.samples: list[tuple[Path, str]] = []
 
     def __len__(self) -> int:
@@ -57,11 +68,20 @@ class VideoDataset(Dataset):
             # version once torchcodec is actually available on Kaggle.
             total = decoder.metadata.num_frames
 
-        needed = self.num_frames * self.frame_stride
-        start = 0 if total <= needed else torch.randint(0, total - needed + 1, (1,)).item()
-        # clamp handles the short-video case by repeating the last available
-        # frame index, equivalent to the old pad-by-repeat behavior.
-        idx = torch.arange(start, start + needed, self.frame_stride).clamp(max=total - 1)
+        if self.deterministic:
+            # Evenly spaced indices across the full [0, total-1] span, so
+            # frame i/num_frames always lands at the same fraction of the
+            # clip's real duration regardless of the clip's native length —
+            # this is the phase alignment step, not just frame-count
+            # matching. frame_stride does not apply here (it describes a
+            # local window stride, not a full-span span).
+            idx = torch.linspace(0, total - 1, self.num_frames).round().long()
+        else:
+            needed = self.num_frames * self.frame_stride
+            start = 0 if total <= needed else torch.randint(0, total - needed + 1, (1,)).item()
+            # clamp handles the short-video case by repeating the last available
+            # frame index, equivalent to the old pad-by-repeat behavior.
+            idx = torch.arange(start, start + needed, self.frame_stride).clamp(max=total - 1)
 
         clip = decoder.get_frames_at(indices=idx).data.float() / 255.0  # (T, C, H, W)
 

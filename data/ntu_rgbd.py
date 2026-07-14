@@ -92,12 +92,27 @@ class NTURGBDDataset(VideoDataset):
                 f"({_VIDEO_EXTENSIONS}); {len(self.unparsed)} files were seen but unparsed."
             )
 
-    def clips_for_action(self, action: int, exclude_performer: int | None = None) -> list[NTUClipMeta]:
+    def clips_for_action(
+        self,
+        action: int,
+        exclude_performer: int | None = None,
+        camera: int | None = None,
+    ) -> list[NTUClipMeta]:
         """Same action, optionally excluding one performer — the exact
         pooling query the Semantic Anchor needs (AGENT.md DEVIATIONS #3:
         "same action performed by other performers").
+
+        `camera`, if given, restricts the pool to one camera view. NTU RGB+D
+        clips of the same action/performer are shot from multiple camera
+        angles (e.g. S004 has C001/C002/C003); pooling across all of them
+        would mix "camera viewpoint" variation into the anchor alongside
+        performer identity, which the anchor is supposed to isolate.
+        Recommended: pass the TARGET clip's own camera here so reference
+        clips share its viewpoint.
         """
         return [
             r for r in self.records
-            if r.action == action and (exclude_performer is None or r.performer != exclude_performer)
+            if r.action == action
+            and (exclude_performer is None or r.performer != exclude_performer)
+            and (camera is None or r.camera == camera)
         ]

@@ -51,7 +51,22 @@ overseer:
 
 # Steering (overseer/semantic_anchor.py, overseer/guidance_vector.py).
 steering:
-  phase_length: null               # TODO: fixed length T every reference clip is resampled to (ARCHITECTURE.md component 4); not yet chosen
+  # decided 2026-07-14: T=16, units = temporal blocks in the TARGET-region
+  # latent (not raw frames). Every clip (target or reference) is already
+  # resampled to the encoder's fixed 64-frame input (vjepa/_hub.py
+  # fpc64-256), giving 32 temporal blocks (tubelet_size=2); the existing
+  # context/target split (vjepa/masking.py build_temporal_split_masks)
+  # takes the second half -> 16 blocks. T=16 reuses that shape rather than
+  # inventing a new one, so every reference clip's real target-region
+  # latent is directly poolable/averageable with no extra shape-matching
+  # step. Resample method: uniform full-span index subsampling, applied
+  # deterministically (data/video_dataset.py VideoDataset(deterministic=
+  # True)) so frame i/64 lands at the same fraction of each clip's real
+  # duration — a random start-offset crop (the existing default for
+  # non-anchor clips) would break cross-performer phase alignment. DTW-based
+  # alignment remains a stretch goal (ARCHITECTURE.md component 4), not
+  # implemented.
+  phase_length: 16
   blind_alpha: null                # TODO: fixed alpha for the Blind arm (arms/blind.py); not yet chosen
 
 # Latent-based visualization (ARCHITECTURE.md component 7b/7c). No pixel

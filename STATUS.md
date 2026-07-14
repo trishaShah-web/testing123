@@ -77,25 +77,59 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   luck. Still NOT a real Semantic Anchor (needs a POOL of reference clips,
   not one) — plumbing check only.
 
+- Two-clip smoke test (`scripts/smoke_test_two_clips.py`) executed
+  successfully on Kaggle, 2026-07-14, on two real NTU clips (same action,
+  different performers): `drift d = 1-cos(predicted, anchor) = 0.5049`;
+  Raw arm `alpha=0.000` gives `||steered-predicted||=0.0000` (correct by
+  construction); Blind arm `alpha=0.300` gives `||steered-predicted||=
+  898.9101` (nonzero, correct-direction move toward the reference
+  performer's real future encoding). Encoder -> predictor -> drift -> steer
+  chain is now CONFIRMED WORKING end-to-end, not just source-verified.
+  Tensor layout guess `(1, C, T, H, W)` confirmed correct (no shape
+  mismatch). Still a plumbing check only — anchor was one degenerate
+  reference clip, not a real pooled Semantic Anchor; do not cite these
+  numbers as a result.
+- Phase alignment decided (2026-07-14): `steering.phase_length = 16`
+  (target-region temporal blocks, not raw frames — reuses the existing
+  64-frame-encode / 32-block / 16-block-target shape already in the
+  pipeline) and resample method = uniform full-span index subsampling,
+  applied **deterministically**. Fixed a real bug found in the process:
+  `VideoDataset._load_clip`'s random start-offset crop would have averaged
+  unaligned action phases across performers; added an opt-in
+  `deterministic=True` mode (`torch.linspace` full-clip-span sampling) used
+  only for anchor reference clips, existing random-crop default unchanged.
+  New `scripts/build_semantic_anchor.py`: pools other-performer clips for
+  an action (`NTURGBDDataset.clips_for_action`), encodes each, extracts the
+  real (not predicted) target-region latent, calls
+  `SemanticAnchor.from_reference_clips`. **Not yet execution-tested** — no
+  real multi-clip pool uploaded to Kaggle yet.
+
+- NTU RGB+D local data audited (`~/Downloads/nturgb+d_rgb/`, 2026-07-14):
+  1440 clips, S004, 4 performers, 3 cameras, 2 reps, 60 actions, 5.5GB — all
+  filenames verified parseable via the real `parse_ntu_filename`, 0
+  unparsed. Found + fixed a camera-view confound: `clips_for_action`
+  (`data/ntu_rgbd.py`) now accepts an optional `camera` filter so anchor
+  pooling doesn't mix viewpoint variation in with performer-identity
+  variation; `scripts/build_semantic_anchor.py` uses the target clip's own
+  camera by default. `dataset-metadata.json` written into the local folder
+  for `kaggle datasets create`.
+
 ### IN PROGRESS
-- Day-1 smoke test: run `scripts/smoke_test_single_clip.py` on one real NTU
-  clip to confirm the source-verified loading + predictor call above
-  actually work. Nothing downstream should be trusted until this passes.
-  Highest-risk unverified assumption going in: the exact tensor layout
-  `VJEPAEncoder.forward()` expects (script currently guesses
-  `(1, C, T, H, W)`) — flagged prominently in the script's own docstring as
-  the first thing to check on a shape-mismatch failure.
+- Actual Kaggle upload: `dataset-metadata.json`'s `id` field needs the
+  user's real Kaggle username, and needs `kaggle` CLI + API credentials
+  configured (not available in this session) to run
+  `kaggle datasets create -p ~/Downloads/nturgb+d_rgb`. Should be created
+  **Private** — NTU RGB+D's usage agreement is research-only, no
+  redistribution.
 
 ### NOT STARTED
 - data curation (NTU subset, UCF101) + Kaggle dataset upload; dataset index
   builders are still TODO stubs
-- anchor construction inputs: phase-alignment/resampling implementation,
-  reference-clip pooling (SemanticAnchor.from_reference_clips itself is
-  implemented — it needs real phase-aligned tensors to consume)
 - LLM Overseer Job 1 (`build_target`) and Job 2 (`schedule_correction`)
   prompt templates — interfaces exist, prompting logic is TODO
-- Blind arm alpha value, phase length T, PCA reference set (all TODO in
-  configs/base.yaml — genuinely open, not invented)
+- Blind arm alpha value, PCA reference set (all TODO in configs/base.yaml —
+  genuinely open, not invented; phase length T is now decided, see
+  COMPLETED above)
 - IDS/SCS/PCS probes (interfaces exist, probe architecture is TODO)
 - NN retrieval + PCA overlay implementations (interfaces exist, distance
   metric / reference set / rendering are TODO)
@@ -108,7 +142,8 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
 - final probe architecture details
 - whether SSv2 makes the timeline
 - Ollama model choice (`overseer.model_name`)
-- Blind arm's fixed alpha, phase-alignment length T, PCA reference set
+- Blind arm's fixed alpha, PCA reference set (phase-alignment length T is
+  now decided — 16 — see COMPLETED above)
 
 ---
 

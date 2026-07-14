@@ -123,7 +123,13 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   for `kaggle datasets create`.
 - Real Semantic Anchor built successfully (`anchor_A015.pt`, 3 reference
   clips, action "take off jacket") — the actual pooled anchor, not the
-  smoke test's one-clip stand-in.
+  smoke test's one-clip stand-in. **This exact file must be rebuilt**: with
+  only 4 total NTU performers, using all 3 non-target performers as
+  references left 0 clips for IDS/SCS probe training on that action,
+  crashing the spike script. Fixed via `build_semantic_anchor.py`'s new
+  `--max-references` (default: always reserve one performer's clips for
+  probe training) — verified via a real end-to-end dry run. Rebuild with
+  no extra flags needed (the reservation is now the default).
 - IDS + SCS implemented (`evaluation/ids.py`, `evaluation/scs.py`, new
   `evaluation/probes.py`): external, read-only linear probes
   (`nn.Linear(embed_dim, num_classes)`, mean-pooled latent tokens — a

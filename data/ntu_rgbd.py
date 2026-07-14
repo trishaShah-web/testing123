@@ -95,12 +95,17 @@ class NTURGBDDataset(VideoDataset):
     def clips_for_action(
         self,
         action: int,
-        exclude_performer: int | None = None,
+        exclude_performer: int | list[int] | None = None,
         camera: int | None = None,
     ) -> list[NTUClipMeta]:
-        """Same action, optionally excluding one performer — the exact
-        pooling query the Semantic Anchor needs (AGENT.md DEVIATIONS #3:
-        "same action performed by other performers").
+        """Same action, optionally excluding one or more performers — the
+        exact pooling query the Semantic Anchor needs (AGENT.md DEVIATIONS
+        #3: "same action performed by other performers"). `exclude_performer`
+        accepts a single performer ID (the common case: excluding the
+        target clip's own performer) or a list (e.g. also reserving one or
+        more OTHER performers out of the anchor's reference pool so their
+        clips remain available as disjoint probe-training examples —
+        scripts/build_semantic_anchor.py `--max-references`).
 
         `camera`, if given, restricts the pool to one camera view. NTU RGB+D
         clips of the same action/performer are shot from multiple camera
@@ -110,9 +115,15 @@ class NTURGBDDataset(VideoDataset):
         Recommended: pass the TARGET clip's own camera here so reference
         clips share its viewpoint.
         """
+        if exclude_performer is None:
+            excluded = set()
+        elif isinstance(exclude_performer, int):
+            excluded = {exclude_performer}
+        else:
+            excluded = set(exclude_performer)
         return [
             r for r in self.records
             if r.action == action
-            and (exclude_performer is None or r.performer != exclude_performer)
+            and r.performer not in excluded
             and (camera is None or r.camera == camera)
         ]

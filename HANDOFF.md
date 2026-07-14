@@ -299,17 +299,48 @@ the plan below is done.
   caught this correctly rather than hiding it. **Not yet run for real** —
   needs a GPU (Kaggle).
 
+**13. Anchor/probe-training overlap bug fixed (2026-07-14, same session).**
+The first real run of `spike_blind_vs_raw.py` (against the actual
+`anchor_A015.pt`, 3 reference clips) crashed: with only 4 total NTU
+performers, excluding the target (P003) + all 3 anchor references (P007,
+P008, P020) left ZERO other-performer A015 clips for probe training.
+- `data/ntu_rgbd.py` `clips_for_action`'s `exclude_performer` now accepts
+  a single ID or a list.
+- `scripts/build_semantic_anchor.py`: new `--max-references` flag caps how
+  many DISTINCT performers feed the anchor (not raw clip count — a
+  capped-in performer's clips at all replications still get used).
+  Default: pool's performer count minus 1, always reserving exactly one
+  performer's clips as disjoint probe-training material. `--exclude-performer`
+  now also accepts multiple IDs for manual reservation. Saved anchor files
+  now also record `reference_performers` and `reserved_performers`.
+- **Verified via a real (mocked-encoder) end-to-end dry run**: rebuilding
+  the A015 anchor with the new default correctly used only performers
+  [7, 8], reserved [20], and `spike_blind_vs_raw.py` correctly picked up
+  P20's A015 clip as a surviving probe-training example (action A15 went
+  from 0 training examples, the crash, to 2). P7/P8 still correctly warn
+  (fully consumed by the anchor) — the fix is precise, not a blanket
+  workaround.
+- `anchor_A015.pt` (the one already saved) predates this fix and still
+  has all 3 references baked in — **must be rebuilt** before the spike
+  script can run on it without hitting the same crash.
+
 ## Where things stand right now / next steps
 
-- **Real anchor building CONFIRMED WORKING** (2026-07-14) —
-  `anchor_A015.pt`. Step (2) below is done.
-- **IDS/SCS implemented, `scripts/spike_blind_vs_raw.py` written and
-  dry-run-verified but NOT yet run for real** (needs GPU/Kaggle) — step (3)
-  is code-complete, execution-pending.
+- **Real anchor building CONFIRMED WORKING**, but the anchor/probe overlap
+  bug (item 13) means `anchor_A015.pt` as currently saved must be
+  **rebuilt** with the updated `build_semantic_anchor.py` before
+  `spike_blind_vs_raw.py` can run on it for real.
+- **IDS/SCS implemented, `scripts/spike_blind_vs_raw.py` written,
+  dry-run-verified (including the max-references fix) but NOT yet run for
+  real** (needs GPU/Kaggle) — step (3) below is code-complete,
+  execution-pending.
 - **Order**: (1) DONE — two-clip smoke test. (2) DONE — real pooled
-  Semantic Anchor. (3) NEXT — actually run `spike_blind_vs_raw.py` on
-  Kaggle against `anchor_A015.pt` (or a freshly-rebuilt one with
-  `reference_paths`) and read the real IDS/SCS numbers; the script's own
+  Semantic Anchor (needs rebuilding with `--max-references`, see item 13).
+  (3) NEXT — rebuild `anchor_A015.pt`
+  (`python scripts/build_semantic_anchor.py <ntu_root> --target-clip
+  <P003 A015 clip path> --output anchor_A015.pt`, no extra flags needed —
+  the reservation is now the default), then run `spike_blind_vs_raw.py`
+  against it on Kaggle and read the real IDS/SCS numbers; the script's own
   printed caveat applies — one target clip is one data point, not a
   verdict, run it across a few target clips (different target performers,
   same action) before trusting a green/red call. (4) only then wire up the
@@ -321,9 +352,10 @@ the plan below is done.
 - **Known limitation to watch**: probe training data comes from the same
   small local NTU subset the anchor is built from, so as more actions/
   performers get consumed by anchors, individual probe classes can end up
-  thin (see the P7/A015 case above) — the spike script's class-balance
-  printout is the guard, but a genuinely robust probe eventually wants a
-  larger, disjoint labeled pool.
+  thin even with the max-references reservation (only one performer is
+  guaranteed spare) — the spike script's class-balance printout is the
+  guard, but a genuinely robust probe eventually wants a larger, disjoint
+  labeled pool.
 
 ## Exact commands reference
 

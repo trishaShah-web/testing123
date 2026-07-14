@@ -38,6 +38,19 @@ to isolate. This script therefore restricts the reference pool to the
 TARGET clip's own camera by default (`NTURGBDDataset.clips_for_action`'s
 `camera` filter) — pass `--all-cameras` to opt out.
 
+Reference/training overlap (found 2026-07-14, scripts/spike_blind_vs_raw.py):
+with few total performers (NTU subset here has 4), pooling ALL non-target
+performers into the anchor leaves ZERO other-performer clips of that same
+action for IDS/SCS probe training — the probe then can't learn what the
+target's action looks like from anyone but the target performer, or
+crashes outright if even the target performer's own clip is the only one
+available. Fix: `--max-references` caps how many DISTINCT performers feed
+the anchor (default: pool's performer count minus 1, always reserving at
+least one performer's clips as disjoint probe-training material — see
+`--max-references`'s help for the exact rule). Reserved performers are
+simply not in `reference_paths`/the anchor's arithmetic; which performers
+were used vs. reserved is printed and saved for provenance.
+
 Usage:
     python scripts/build_semantic_anchor.py /path/to/ntu_root \
         --target-clip /path/to/ntu_root/S004C002P003R001A013_rgb.avi \
@@ -46,7 +59,9 @@ Usage:
     (infers action=13, exclude_performer=3, camera=2 straight from the
     target clip's filename via data.ntu_rgbd.parse_ntu_filename. Or specify
     --action/--exclude-performer/--camera explicitly instead of
-    --target-clip. Run --help for all args.)
+    --target-clip. --exclude-performer also accepts multiple IDs, for
+    manually reserving specific performers instead of relying on
+    --max-references' automatic cap. Run --help for all args.)
 """
 
 from __future__ import annotations
@@ -80,9 +95,11 @@ def main() -> None:
     )
     parser.add_argument("--action", type=int, default=None, help="NTU action code, e.g. 13 for A013")
     parser.add_argument(
-        "--exclude-performer", type=int, default=None,
-        help="performer ID to exclude from pooling (the TARGET clip's own performer P) — "
-             "AGENT.md DEVIATIONS #3 requires other performers Q != P",
+        "--exclude-performer", type=int, nargs="+", default=None,
+        help="performer ID(s) to exclude from pooling. Always include the TARGET clip's own "
+             "performer P (AGENT.md DEVIATIONS #3 requires other performers Q != P) — pass "
+             "additional IDs to also manually reserve specific performers for probe training "
+             "instead of relying on --max-references' automatic cap.",
     )
     parser.add_argument(
         "--camera", type=int, default=None,
@@ -93,6 +110,14 @@ def main() -> None:
         help="opt out of the camera restriction and pool across all camera views (not recommended: "
              "mixes viewpoint variation into the anchor alongside performer identity)",
     )
+    parser.add_argument(
+        "--max-references", type=int, default=None,
+        help="cap on how many DISTINCT performers feed the anchor (not raw clip count — a capped-in "
+             "performer's clips at all replications are still used). Default: pool's performer count "
+             "minus 1, i.e. always reserve exactly one performer's clips as disjoint probe-training "
+             "material (see module docstring 'Reference/training overlap'). Pass the full pool size "
+             "to disable reservation, or 0 to force the default rule explicitly.",
+    )
     parser.add_argument("--output", type=Path, default=None, help="path to save the anchor via torch.save")
     args = parser.parse_args()
 
@@ -101,7 +126,8 @@ def main() -> None:
         meta = parse_ntu_filename(args.target_clip)
         if meta is None:
             raise SystemExit(f"--target-clip {args.target_clip} does not match SsssCcccPpppRrrrAaaa")
-        action, exclude_performer, camera = meta.action, meta.performer, meta.camera
+        action, camera = meta.action, meta.camera
+        exclude_performer = [meta.performer] + (args.exclude_performer or [])
         print(f"inferred from target clip: action={action} ({meta.action_label}), "
               f"exclude_performer={exclude_performer}, camera={camera}")
     if args.all_cameras:
@@ -113,14 +139,29 @@ def main() -> None:
     print(f"device: {device}")
 
     dataset = NTURGBDDataset(root=args.ntu_root, num_frames=NUM_FRAMES, deterministic=True)
-    records = dataset.clips_for_action(action, exclude_performer=exclude_performer, camera=camera)
-    if not records:
+    candidates = dataset.clips_for_action(action, exclude_performer=exclude_performer, camera=camera)
+    if not candidates:
         raise SystemExit(
             f"no other-performer clips found for action {action} "
             f"(exclude_performer={exclude_performer}, camera={camera}) under {args.ntu_root}"
         )
-    print(f"pooling {len(records)} reference clip(s) for action {action} "
-          f"({records[0].action_label}), excluding performer {exclude_performer}, camera={camera}")
+
+    candidate_performers = sorted({r.performer for r in candidates})
+    max_references = args.max_references
+    if not max_references:  # None or explicit 0 both mean "apply the default rule"
+        max_references = max(1, len(candidate_performers) - 1)
+    used_performers = candidate_performers[:max_references]
+    reserved_performers = candidate_performers[max_references:]
+    records = [r for r in candidates if r.performer in used_performers]
+
+    print(f"pooling {len(records)} reference clip(s) across performers {used_performers} for action {action} "
+          f"({candidates[0].action_label}), excluding performer {exclude_performer}, camera={camera}")
+    if reserved_performers:
+        print(f"reserved performer(s) {reserved_performers} out of the anchor — their clips for this "
+              f"action remain available as disjoint probe-training material")
+    else:
+        print("WARNING: no performers reserved (pool too small to spare one) — probe training for this "
+              "action will have zero clips from performers other than the target's own")
 
     print("loading encoder + predictor (torch.hub, first run will download)...")
     encoder = VJEPAEncoder(device=device)
@@ -168,6 +209,8 @@ def main() -> None:
                 # scripts/spike_blind_vs_raw.py probe training must not
                 # train on the exact clips that fed this anchor):
                 "reference_paths": [str(r.path) for r in records],
+                "reference_performers": used_performers,
+                "reserved_performers": reserved_performers,
                 "action": action,
                 "camera": camera,
             },

@@ -125,6 +125,16 @@ def main() -> None:
     parser.add_argument("--pca-basis", type=Path, required=True, help="path to a basis .pt saved by scripts/build_pca_basis.py")
     parser.add_argument("--blind-alpha", type=float, default=None, help="override steering.blind_alpha from configs/base.yaml")
     parser.add_argument("--output-dir", type=Path, default=Path("/kaggle/working/checkpoints/viz"), help="outputs saved under <output-dir>/<target-clip-stem>/")
+    parser.add_argument("--skip-nn-retrieval", action="store_true",
+                         help="skip NN retrieval entirely (PCA overlay only) — NN retrieval re-encodes "
+                              "every one of the anchor's reference clips to build its comparison bank, "
+                              "which can dominate runtime on a slow/contended GPU if the anchor has many "
+                              "references; PCA overlay only needs the target clip + the anchor's already-"
+                              "computed mean latent, so it stays fast regardless of anchor size")
+    parser.add_argument("--max-nn-reference-clips", type=int, default=None,
+                         help="cap how many of the anchor's reference clips get re-encoded for the NN "
+                              "retrieval bank (default: use all of them). Lowering this trades retrieval "
+                              "diversity for speed without needing to rebuild the anchor itself smaller.")
     args = parser.parse_args()
 
     target_meta = parse_ntu_filename(args.target_clip)
@@ -197,14 +207,21 @@ def main() -> None:
     del predicted_target, target_clip_frames
     clear_gpu(device)
 
-    if "reference_paths" not in anchor_data:
+    if args.skip_nn_retrieval:
+        print("\n--skip-nn-retrieval passed — skipping NN retrieval (PCA overlay above is already saved).")
+    elif "reference_paths" not in anchor_data:
         print("\nWARNING: anchor has no 'reference_paths' — skipping NN retrieval (no reference bank "
               "available without exact provenance). Rebuild the anchor with the current "
               "scripts/build_semantic_anchor.py to enable this.")
     else:
-        print("\nbuilding NN retrieval reference bank from the anchor's reference clips...")
+        reference_paths = anchor_data["reference_paths"]
+        if args.max_nn_reference_clips is not None and len(reference_paths) > args.max_nn_reference_clips:
+            print(f"\ncapping NN retrieval reference bank to {args.max_nn_reference_clips} of the anchor's "
+                  f"{len(reference_paths)} reference clip(s) (--max-nn-reference-clips)")
+            reference_paths = reference_paths[:args.max_nn_reference_clips]
+        print(f"\nbuilding NN retrieval reference bank from {len(reference_paths)} reference clip(s)...")
         reference_bank: list[ReferenceBankEntry] = []
-        for ref_path_str in anchor_data["reference_paths"]:
+        for ref_path_str in reference_paths:
             ref_path = Path(ref_path_str)
             real_target, ref_clip = encode_real_target(dataset, ref_path, encoder, masks_y, device)
             ref_blocks = real_target.view(NUM_TARGET_BLOCKS, NUM_SPATIAL_PATCHES, -1)

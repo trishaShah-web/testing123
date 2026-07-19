@@ -176,9 +176,12 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   above)
 - PCS (interfaces exist, delta-comparison method is TODO — IDS/SCS are now
   implemented, PCS is not)
-- **Day-2 spike (GATE)** — script exists, now supports multiple target
-  clips in one run + class-balanced probes (2026-07-19), dry-run-verified
-  with a mocked encoder, but has not been executed for real yet
+- **Day-2 spike (GATE)** — RUN FOR REAL 2026-07-19 (Kaggle, action A023,
+  n=3 target clips, `ntu-rgbd-s00567-subset`): IDS Raw=0.333/Blind=0.333
+  (no drop), SCS Raw=0.0/Blind=1.0 (large improvement). **Gate condition
+  FALSE** (fails on IDS specifically). One action, n=3 — a real but
+  preliminary data point, not a final verdict; see Gate section below and
+  HANDOFF.md item 16.
 - three-arm experiment, ablation (alpha)
 - figures, writing
 
@@ -196,6 +199,14 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
 **Day-2 spike is a hard gate.** On a few NTU clips: measure IDS + SCS on Raw, apply
 Blind averaging, re-measure. Green if IDS drops and SCS holds. If red, pivot to
 **audit-only** (measure drift, no intervention) — a legitimate WiCV paper.
+
+**First real run (2026-07-19, action A023, n=3): RED** — IDS did not drop
+(identical Raw/Blind, 0.333 both), though SCS improved substantially
+(0.0 -> 1.0). This is one action, n=3 clips — STATUS.md's own gate wording
+("a few NTU clips") is satisfied numerically but not across multiple
+actions, so this is not yet being treated as the final gate verdict.
+**Next: repeat on 1-2 more actions before deciding** whether to pivot to
+audit-only (pre-approved fallback, not a defeat) or keep iterating.
 
 ## Datasets — NOT STARTED
 NTU RGB+D 120 (curated subset), Something-Something v2 (subset, if time), UCF101.

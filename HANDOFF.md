@@ -460,46 +460,108 @@ separate fix before anything routes through it.
   confirm the tensor plumbing is correct; they do NOT confirm anything
   about real V-JEPA latents (still untested end-to-end on Kaggle).
 
+**16. FIRST REAL (not mocked, not dry-run) Day-2 spike gate execution
+(2026-07-19, Kaggle, Account D, dataset `ntu-rgbd-s00567-subset` /
+170-clip Kaggle dataset, 21 performers across setups S004-S007 — NOT the
+originally-assumed 4-performer subset, see below).** Action A023 ("hand
+waving"), anchor built from 10 reference clips (performers [1,4,7,8,10],
+`--max-references 5`), 3 target clips scored (performers P013, P015,
+P020 — all reserved, none overlapping the anchor or each other), camera
+C001 throughout.
+
+- **Class balancing confirmed working exactly as designed on real data**:
+  before capping, A8=21, A23(target)=14, A27=21 — the target action was
+  the naturally-thinnest class (matches the original diagnosis exactly),
+  filler actions A1/A6/A24 came back with 0 examples each (see below, not
+  a bug). After capping: A8=14, A23=14, A27=14 — capped to the target's
+  own count rather than the target being starved by the fillers, which is
+  the actual fix working correctly under real leakage exclusion, not just
+  the mocked test from item 14.
+- **Found (not a bug): this specific 170-clip Kaggle subset only contains
+  5 actions total** (8, 9, 15, 23, 27) — 3 of the 5 hardcoded
+  `FILLER_ACTIONS` in `spike_blind_vs_raw.py` (1, 6, 24) don't exist in it
+  at all, so those classes correctly came back empty and were skipped
+  (no crash — `build_probe_training_set`'s `if not surviving_counts`
+  guard only fires if EVERY class is empty). Net effect: the action probe
+  in this run was really a 3-class problem (chance=0.333), not 6-class.
+  `FILLER_ACTIONS` is a fixed constant assuming the fuller NTU action
+  range; it silently degrades to whatever subset of it actually exists in
+  a given curated dataset — worth knowing when reading chance-adjusted
+  SCS numbers from any given run, not something to fix (the actions that
+  do exist, 8 and 27, still gave a real multi-class problem).
+- **Real result (n=3 target clips, ONE action, honestly reported per
+  AGENT.md's rules — not spun)**:
+  - IDS: Raw mean=0.333, Blind mean=0.333 — **identical**, and identical
+    per-clip too (same right/wrong performer call on every single clip
+    between arms). Blind steering (alpha=0.3, confirmed moving the latent
+    ~550-560 in norm, consistent with the earlier two-clip smoke test's
+    scale) did not measurably reduce identity leakage on this sample.
+  - SCS: Raw mean=0.0 (action probe wrong on all 3 unsteered clips),
+    Blind mean=1.0 (correct on all 3 after steering) — a large, real
+    improvement in action-semantic recognizability from steering.
+  - **Gate condition (`IDS dropped AND SCS held`): FALSE** — fails
+    specifically because IDS didn't drop (SCS not only held but improved
+    substantially).
+  - This is a genuine mixed/negative result on IDS, not a code defect —
+    the pipeline, balancing, and multi-clip scoring all executed exactly
+    as designed. Per AGENT.md's honesty rules ("report negative results
+    honestly") and its pre-approved fallback ("if the Day-2 spike fails,
+    ship the audit-only paper — not a defeat"), this is a real data point
+    toward that decision, but n=3 target clips on ONE action is not yet
+    enough to treat as a final verdict — needs the same run repeated
+    across at least a couple more actions before the team commits either
+    way.
+- **Also corrected an earlier wrong assumption from this same session**:
+  the "only 4 performers, thinness is unavoidable" framing (used to design
+  `--max-references 1` caution for Account D) was based on an incomplete
+  `head -20` sample of `SUBSET_170`, not the real full listing. The actual
+  dataset has 21 performers across setups S004-S007 for at least action
+  A023. `ntu-rgbd-s004-subset` (the *other* mounted Kaggle dataset,
+  `NTU_S004`) genuinely is the thin one (20 clips, 4 performers) — it was
+  never used for a real run.
+
 ## Where things stand right now / next steps
 
-- **Real anchor building CONFIRMED WORKING**, but the anchor/probe overlap
-  bug (item 13) means `anchor_A015.pt` as currently saved must be
-  **rebuilt** with the updated `build_semantic_anchor.py` before
-  `spike_blind_vs_raw.py` can run on it for real.
-- **IDS/SCS implemented; `scripts/spike_blind_vs_raw.py` rewritten (item 14)
-  to fix class imbalance (deterministic cap-to-min-class-count) and to
-  accept multiple `--target-clip` paths in one run (`train_probes` once +
-  `score_clip` looped + per-arm mean IDS/SCS across clips) — this is now
-  code-complete for the ACTUAL "a few NTU clips" gate check, not just one
-  clip. Dry-run-verified this session with a mocked encoder/dataset
-  (tensor-shape/logic correctness only); NOT yet run for real** (needs
-  GPU/Kaggle) — this is the very next thing to run, high priority (blocks
-  the running accounts).
-- **Visualization implemented** (item 15): `visualization/pca_overlay.py`
-  and `visualization/nn_retrieval.py` are real (were stubs), plus two new
-  scripts (`scripts/build_pca_basis.py`, `scripts/visualize_steering.py`).
-  Verified via synthetic-tensor unit tests only — NOT yet run against real
-  V-JEPA latents on Kaggle.
-- **Order**: (1) DONE — two-clip smoke test. (2) DONE — real pooled
-  Semantic Anchor (needs rebuilding with `--max-references`, see item 13).
-  (3) NEXT, two parallel tracks now that both are code-complete:
-  (3a) rebuild `anchor_A015.pt`
-  (`python scripts/build_semantic_anchor.py <ntu_root> --target-clip
-  <P003 A015 clip path> --output anchor_A015.pt`), then run the rewritten
-  `spike_blind_vs_raw.py` **across several target clips at once**
-  (`--target-clip <clip1> <clip2> ...`, same action, different performers)
-  on Kaggle and read the real, now-balanced IDS/SCS numbers — this is the
-  first run that can actually answer the Day-2 gate question rather than
-  produce a single anecdotal data point. (3b) `python
-  scripts/build_pca_basis.py <ntu_root> --from-anchor anchor_A015.pt
-  --output pca_basis.pt`, then `python scripts/visualize_steering.py
-  <ntu_root> --target-clip <clip> --anchor anchor_A015.pt --pca-basis
-  pca_basis.pt` and eyeball the outputs under
-  `/kaggle/working/checkpoints/viz/`. (4) only then wire up the LLM (Job
-  1/Job 2 in `overseer/llm_overseer.py`, both still `NotImplementedError`).
+- **Day-2 spike gate: RUN FOR REAL, current verdict FALSE on n=3/one
+  action (item 16)** — IDS didn't drop, SCS improved substantially. Not
+  yet enough data to decide between "iterate on more actions" and "pivot
+  to the pre-approved audit-only paper" — that's the live decision now.
+- **Real anchor building CONFIRMED WORKING** — now confirmed on TWO real
+  datasets/subsets (item 12's original `anchor_A015.pt` on the 4-performer
+  local subset, item 16's real Kaggle run on the 21-performer
+  `ntu-rgbd-s00567-subset`). `anchor_A015.pt` specifically still needs
+  rebuilding per item 13 if anyone returns to it; the Kaggle Account
+  D/C anchors from item 16/17 don't have this problem (built fresh with
+  `--max-references` already the default).
+- **IDS/SCS + multi-clip spike gate: CODE-COMPLETE AND RUN FOR REAL**
+  (item 14 wrote it, item 16 ran it). Not yet run across more than one
+  action — see "Order" below for what's actually next.
+- **Visualization: CODE-COMPLETE** (item 15), verified with synthetic
+  tensors; real-Kaggle execution status on Account C is whatever the user
+  confirms next (last known: `build_semantic_anchor.py` had started
+  running there, completion not yet confirmed back to this session).
+- **Order, updated**: (1)-(3) DONE for real, including a first Day-2 gate
+  data point (item 16). NEXT: (4) repeat item 16's `spike_blind_vs_raw.py`
+  run on at least one or two MORE actions (different `--target-clip`
+  action, needs its own anchor first) to see whether "IDS doesn't drop"
+  holds as a pattern or was specific to A023 — this is the actual
+  remaining gate work, not a new capability to build. (5) confirm Account
+  C's `visualize_steering.py` completed for real and produced sane-looking
+  PCA overlay / NN retrieval images (visual sanity check, not just "no
+  crash"). (6) only after (4) and (5): decide, per AGENT.md's pre-approved
+  fallback, whether to keep iterating the steering method or pivot to the
+  audit-only paper framing — genuinely open, not something to invent an
+  answer to here. (7) only if continuing the steering direction: wire up
+  the LLM (Job 1/Job 2 in `overseer/llm_overseer.py`, both still
+  `NotImplementedError`) and implement PCS (`evaluation/pcs.py`, also
+  still `NotImplementedError` — every real run so far has reported IDS/SCS
+  only, NOT the third mandatory metric AGENT.md requires every experiment
+  report).
 - **Still untouched stubs**: `data/something_something_v2.py`,
   `data/ucf101.py`, `overseer/llm_overseer.py` (Job1/Job2 prompt logic),
-  `evaluation/pcs.py`.
+  `evaluation/pcs.py` (PCS — genuinely missing from every result reported
+  so far, not optional per AGENT.md's "every experiment reports all
+  three").
 - **Known bug, flagged not fixed (item 15)**: `pipeline/inference_loop.py`'s
   `SteeringPipeline` still hardcodes the pre-16-frame mask dimensions
   (`_NUM_TEMPORAL_BLOCKS = 64 // 2`) and would likely break if anything

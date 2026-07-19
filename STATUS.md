@@ -135,10 +135,26 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   (`nn.Linear(embed_dim, num_classes)`, mean-pooled latent tokens — a
   documented decision) trained on a small held-out labeled set, top-1
   accuracy reported against chance. `steering.blind_alpha` decided: 0.3.
-  New `scripts/spike_blind_vs_raw.py` runs the actual Day-2 gate
-  comparison for one target clip; dry-run-verified (real dataset/anchor/
-  probe-training logic, GPU encoder/predictor mocked) but not yet run for
-  real — needs Kaggle GPU.
+  `scripts/spike_blind_vs_raw.py` runs the Day-2 gate comparison; as of
+  2026-07-19 it accepts several target clips in one run (`train_probes`
+  once, `score_clip` looped, per-arm mean IDS/SCS across clips) and caps
+  every probe training class to the smallest surviving class's count
+  (deterministic, seeded) to fix a real action-class imbalance found in the
+  first real runs. Dry-run-verified with a mocked encoder/dataset; not yet
+  run for real — needs Kaggle GPU.
+- NN retrieval + PCA overlay implemented (2026-07-19):
+  `visualization/pca_overlay.py` (`PCABasis`, `fit_shared_pca_basis` via
+  `torch.linalg.svd`, `project_to_rgb_overlay`) and
+  `visualization/nn_retrieval.py` (`retrieve_nearest_real_frames` — cosine
+  distance, matching `overseer/drift_detection.py`'s existing convention —
+  and `stitch_to_mp4` via `torchcodec.encoders.VideoEncoder`, not
+  torchvision's removed video I/O). New `scripts/build_pca_basis.py` (fits
+  + saves the shared basis once) and `scripts/visualize_steering.py`
+  (renders both, one target clip at a time). Verified via synthetic-tensor
+  unit tests (shape/logic correctness); not yet run against real V-JEPA
+  latents on Kaggle. Reference-set composition for the PCA basis is chosen
+  per invocation of `build_pca_basis.py` (`--clips` or `--from-anchor`),
+  not a single global config value — see that script's docstring.
 
 ### IN PROGRESS
 - Actual Kaggle upload: `dataset-metadata.json`'s `id` field needs the
@@ -160,10 +176,9 @@ COMPLETED / IN PROGRESS / NOT STARTED / UNKNOWN.
   above)
 - PCS (interfaces exist, delta-comparison method is TODO — IDS/SCS are now
   implemented, PCS is not)
-- NN retrieval + PCA overlay implementations (interfaces exist, distance
-  metric / reference set / rendering are TODO)
-- **Day-2 spike (GATE)** — script exists and is dry-run-verified, but has
-  not been executed for real yet
+- **Day-2 spike (GATE)** — script exists, now supports multiple target
+  clips in one run + class-balanced probes (2026-07-19), dry-run-verified
+  with a mocked encoder, but has not been executed for real yet
 - three-arm experiment, ablation (alpha)
 - figures, writing
 

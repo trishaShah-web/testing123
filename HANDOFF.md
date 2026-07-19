@@ -324,38 +324,201 @@ P008, P020) left ZERO other-performer A015 clips for probe training.
   has all 3 references baked in — **must be rebuilt** before the spike
   script can run on it without hitting the same crash.
 
+**14. Probe class-imbalance fixed + spike script refactored for multi-clip runs
+(2026-07-19).** Confirmed the reported problem by reading the real selection
+logic in `build_probe_training_set` before changing anything: filler actions
+are never touched by leakage exclusion (up to ~4 examples/class, one per
+performer), while the target action's own cross-performer clips are largely
+consumed by the anchor's `reference_paths` exclusion (typically 1-2 surviving
+examples) — a structural asymmetry from anchor-building, not bad luck. SCS
+was measuring a probe that had almost no target-class signal to learn from.
+- `scripts/spike_blind_vs_raw.py` rewritten:
+  - **Class balancing**: `build_probe_training_set` now collects all
+    surviving candidates per action class, then caps every class down to the
+    SMALLEST surviving class's count via deterministic (seeded) subsampling
+    — no class fabricated or oversampled, cap value + seed printed every run
+    (`configs/base.yaml` `seed: 42`, override with `--seed`). Both
+    before/after class-balance tables are printed.
+  - **Perf fix**: split into `train_probes(dataset, encoder, masks_y,
+    device, target_action, target_camera, exclude_paths, seed) ->
+    TrainedProbes` (builds the training pool + fits both probes, called
+    ONCE per run) and `score_clip(target_meta, dataset, encoder,
+    world_model, masks_x, masks_y, anchor, probes, blind_alpha, device) ->
+    dict` (one target clip's encode/predict/steer/score, called in a loop).
+    Previously the ~24-clip training pool was re-encoded from scratch for
+    every target clip; now it's encoded once regardless of how many target
+    clips are scored.
+  - **`--target-clip` now accepts multiple paths** (`nargs="+"`), all must
+    share the anchor's action (validated, raises `SystemExit` otherwise).
+    `main()` trains probes once, loops `score_clip` per clip, and prints a
+    per-arm mean IDS/SCS across all target clips plus the gate condition on
+    those means — this is the actual "run across a few target clips, look at
+    the trend" gate check STATUS.md/HANDOFF item 12 called for, not just a
+    performance fix. Single-clip invocations still work (n=1 caveat still
+    printed).
+  - Added a matching `target_meta.action not in probes.action_encoder.classes`
+    guard next to the existing performer-side one (an existing gap where a
+    fully-excluded target action would previously crash inside
+    `LabelEncoder.encode` with a less clear `ValueError` instead of a clean
+    `SystemExit`).
+  - Did NOT touch `scripts/build_semantic_anchor.py`, the anchor/steering
+    arithmetic (`overseer/*.py`), or `arms/*.py` — out of scope, confirmed
+    unchanged.
+- **Not execution-tested this session** (no GPU/Kaggle access here) —
+  `python3 -m py_compile` passes; needs a real Kaggle run before trusting the
+  printed numbers. This is the next thing to run.
+- **Found, not fixed (flagged only, per explicit instruction not to touch it
+  in this session)**: `pipeline/inference_loop.py`'s `SteeringPipeline` still
+  hardcodes `_NUM_TEMPORAL_BLOCKS = 64 // 2` / `_NUM_SPATIAL_PATCHES = 256`
+  — the pre-DEVIATIONS-#6 64-frame config. It was never updated when
+  `NUM_FRAMES` moved to 16 (item 11 above). As written it would build masks
+  sized for 32 temporal blocks while being fed a 16-frame/8-block clip and
+  likely fail inside `apply_masks`'s `torch.gather` (out-of-range index) —
+  this class is not used by `spike_blind_vs_raw.py` or
+  `build_semantic_anchor.py` (both bypass it and call
+  `encoder`/`world_model.predict_future`/`apply_steering` directly with the
+  correct 16-frame constants), so it hasn't caused a failure yet, but should
+  not be trusted or wired into anything new until fixed separately.
+
+**15. Visualization implemented: PCA overlay (primary) + NN retrieval
+(secondary) (2026-07-19, same session as item 14).** Both
+`visualization/pca_overlay.py` and `visualization/nn_retrieval.py` were pure
+`NotImplementedError` stubs before this; both are now real implementations.
+Reuses the same encode/predict/steer call sequence
+`scripts/spike_blind_vs_raw.py` uses (inlined into a new driver script, see
+below) — explicitly NOT routed through `pipeline/inference_loop.py`'s
+`SteeringPipeline`, which still hardcodes the pre-DEVIATIONS-#6 64-frame
+mask dims (`_NUM_TEMPORAL_BLOCKS = 64 // 2`, `_NUM_SPATIAL_PATCHES = 256`)
+and would build wrongly-sized masks for the actual 16-frame/8-block input,
+likely failing inside `apply_masks`'s `torch.gather`. **Flagged, not
+fixed** — out of scope for this task per explicit instruction; needs a
+separate fix before anything routes through it.
+- **PCA overlay** (`visualization/pca_overlay.py`): new `PCABasis` dataclass
+  (`mean`, `components` [3,D], plus `component_min`/`component_max` [3] —
+  the min/max are fit on the SAME reference set as the axes, at the SAME
+  `fit_shared_pca_basis` call, specifically so per-image color rescaling
+  can't quietly reintroduce the "non-comparable colors across arms" bug one
+  level below the axis-sharing fix). `fit_shared_pca_basis` (SVD-based,
+  no new dependency — no sklearn in requirements.txt, so this uses
+  `torch.linalg.svd` directly). `project_to_rgb_overlay(latent_blocks
+  [T_blocks, num_spatial_patches, D], original_frames [T_blocks, C, H, W],
+  pca_basis, output_path, alpha=0.5)` projects each temporal block's tokens
+  through the fixed basis, reshapes to a 16x16 grid (verified square:
+  `num_spatial_patches=256`), upsamples with **nearest** interpolation
+  (documented: a patch has no sub-patch resolution, so smooth interpolation
+  would imply false precision), alpha-blends over that block's real
+  representative frame, and saves one horizontally-concatenated strip image
+  per clip/arm.
+  - New `scripts/build_pca_basis.py`: the "fit once" step — takes an
+    explicit `--clips` list or `--from-anchor <anchor.pt>` (reuses that
+    anchor's `reference_paths`, no separate reference-set curation
+    decision needed), encodes each clip's real target-region latent (same
+    code path as `build_semantic_anchor.py`), fits+saves `pca_basis.pt`.
+    **Not yet run for real** (needs Kaggle/GPU) — verified via a synthetic-
+    tensor unit test instead (see below).
+- **NN retrieval** (`visualization/nn_retrieval.py`): new `ReferenceBankEntry`
+  dataclass (`clip_path`, `block_index`, `frame_path`, `feature` — one
+  real (clip, target-temporal-block) candidate). `retrieve_nearest_real_frames`
+  mean-pools each query temporal block and picks the bank entry with the
+  highest cosine similarity (documented decision, approved: cosine, matching
+  `overseer/drift_detection.py`'s existing `1-cos` convention elsewhere in
+  the project — "distance in latent space" now means one consistent thing
+  everywhere). `stitch_to_mp4` and `save_frame_as_image` materialize
+  retrieved/query frames to real files and stitch them into a small mp4,
+  always printed/labeled "retrieval" (no pixel watermark — would need a
+  font-rendering dependency this project doesn't otherwise need).
+  - **Found + fixed while implementing**: `stitch_to_mp4` was first written
+    against `torchvision.io.write_video`, which does not exist in the
+    installed `torchvision==0.28` — torchvision's video I/O was deprecated
+    and removed, which is the exact reason `data/video_dataset.py` already
+    switched frame *decoding* to torchcodec (see that file's own docstring).
+    Switched `stitch_to_mp4` to `torchcodec.encoders.VideoEncoder(...).to_file(...)`
+    (torchcodec 0.14, installed, has a real encoder now) — consistent with
+    the project's existing torchcodec decision rather than reintroducing a
+    dead torchvision path. Verified this actually encodes a real (small)
+    mp4 file via a synthetic-frame test, not just import-checked.
+- New driver script `scripts/visualize_steering.py`: for one target clip +
+  anchor + `pca_basis.pt`, computes Raw (alpha=0) and Blind (alpha=
+  `steering.blind_alpha`) predicted/steered latents (same inlined
+  encode/predict/steer sequence as `spike_blind_vs_raw.py`), renders PCA
+  overlays for both arms plus one combined Raw-vs-Blind comparison image,
+  builds an NN reference bank from the anchor's `reference_paths` (skips
+  NN retrieval with a clear warning if the anchor predates that field),
+  retrieves + stitches an mp4 per arm, and saves a real-vs-retrieved
+  side-by-side comparison image per arm. All outputs default under
+  `/kaggle/working/checkpoints/viz/<target-clip-stem>/`. One clip at a
+  time, `torch.cuda.empty_cache()` between every encode call (same
+  discipline as the other Kaggle scripts). **Not yet run for real** (needs
+  Kaggle/GPU + a built anchor + a built PCA basis).
+- **Verified via synthetic-tensor smoke tests this session** (no GPU/
+  checkpoint needed — pure tensor-shape/math correctness, run in the local
+  venv, not on Kaggle): `fit_shared_pca_basis` produces the right shapes,
+  `PCABasis` state-dict round-trips exactly, `project_to_rgb_overlay`
+  produces the correct output image shape, `retrieve_nearest_real_frames`
+  correctly retrieves an exact cosine-similarity match in a constructed
+  test case, and `stitch_to_mp4` produces a real playable mp4 file. These
+  confirm the tensor plumbing is correct; they do NOT confirm anything
+  about real V-JEPA latents (still untested end-to-end on Kaggle).
+
 ## Where things stand right now / next steps
 
 - **Real anchor building CONFIRMED WORKING**, but the anchor/probe overlap
   bug (item 13) means `anchor_A015.pt` as currently saved must be
   **rebuilt** with the updated `build_semantic_anchor.py` before
   `spike_blind_vs_raw.py` can run on it for real.
-- **IDS/SCS implemented, `scripts/spike_blind_vs_raw.py` written,
-  dry-run-verified (including the max-references fix) but NOT yet run for
-  real** (needs GPU/Kaggle) — step (3) below is code-complete,
-  execution-pending.
+- **IDS/SCS implemented; `scripts/spike_blind_vs_raw.py` rewritten (item 14)
+  to fix class imbalance (deterministic cap-to-min-class-count) and to
+  accept multiple `--target-clip` paths in one run (`train_probes` once +
+  `score_clip` looped + per-arm mean IDS/SCS across clips) — this is now
+  code-complete for the ACTUAL "a few NTU clips" gate check, not just one
+  clip. Dry-run-verified this session with a mocked encoder/dataset
+  (tensor-shape/logic correctness only); NOT yet run for real** (needs
+  GPU/Kaggle) — this is the very next thing to run, high priority (blocks
+  the running accounts).
+- **Visualization implemented** (item 15): `visualization/pca_overlay.py`
+  and `visualization/nn_retrieval.py` are real (were stubs), plus two new
+  scripts (`scripts/build_pca_basis.py`, `scripts/visualize_steering.py`).
+  Verified via synthetic-tensor unit tests only — NOT yet run against real
+  V-JEPA latents on Kaggle.
 - **Order**: (1) DONE — two-clip smoke test. (2) DONE — real pooled
   Semantic Anchor (needs rebuilding with `--max-references`, see item 13).
-  (3) NEXT — rebuild `anchor_A015.pt`
+  (3) NEXT, two parallel tracks now that both are code-complete:
+  (3a) rebuild `anchor_A015.pt`
   (`python scripts/build_semantic_anchor.py <ntu_root> --target-clip
-  <P003 A015 clip path> --output anchor_A015.pt`, no extra flags needed —
-  the reservation is now the default), then run `spike_blind_vs_raw.py`
-  against it on Kaggle and read the real IDS/SCS numbers; the script's own
-  printed caveat applies — one target clip is one data point, not a
-  verdict, run it across a few target clips (different target performers,
-  same action) before trusting a green/red call. (4) only then wire up the
-  LLM (Job 1/Job 2 in `overseer/llm_overseer.py`, both still
-  `NotImplementedError`).
+  <P003 A015 clip path> --output anchor_A015.pt`), then run the rewritten
+  `spike_blind_vs_raw.py` **across several target clips at once**
+  (`--target-clip <clip1> <clip2> ...`, same action, different performers)
+  on Kaggle and read the real, now-balanced IDS/SCS numbers — this is the
+  first run that can actually answer the Day-2 gate question rather than
+  produce a single anecdotal data point. (3b) `python
+  scripts/build_pca_basis.py <ntu_root> --from-anchor anchor_A015.pt
+  --output pca_basis.pt`, then `python scripts/visualize_steering.py
+  <ntu_root> --target-clip <clip> --anchor anchor_A015.pt --pca-basis
+  pca_basis.pt` and eyeball the outputs under
+  `/kaggle/working/checkpoints/viz/`. (4) only then wire up the LLM (Job
+  1/Job 2 in `overseer/llm_overseer.py`, both still `NotImplementedError`).
 - **Still untouched stubs**: `data/something_something_v2.py`,
   `data/ucf101.py`, `overseer/llm_overseer.py` (Job1/Job2 prompt logic),
-  `evaluation/pcs.py`, and `visualization/nn_retrieval.py|pca_overlay.py`.
+  `evaluation/pcs.py`.
+- **Known bug, flagged not fixed (item 15)**: `pipeline/inference_loop.py`'s
+  `SteeringPipeline` still hardcodes the pre-16-frame mask dimensions
+  (`_NUM_TEMPORAL_BLOCKS = 64 // 2`) and would likely break if anything
+  routed a real 16-frame clip through it. Nothing currently does (every
+  working script bypasses it and calls encoder/world_model/apply_steering
+  directly) — but fix it before wiring anything new through that class.
 - **Known limitation to watch**: probe training data comes from the same
-  small local NTU subset the anchor is built from, so as more actions/
-  performers get consumed by anchors, individual probe classes can end up
-  thin even with the max-references reservation (only one performer is
-  guaranteed spare) — the spike script's class-balance printout is the
-  guard, but a genuinely robust probe eventually wants a larger, disjoint
-  labeled pool.
+  small local NTU subset the anchor is built from. The class-balancing cap
+  added in item 14 fixes the *action*-class imbalance (SCS), but caps down
+  to the smallest surviving class — with this few performers, that can mean
+  very small per-class counts (the mocked dry run saw cap=1), which in turn
+  makes it MORE likely that any single target clip's own performer ends up
+  with zero surviving *performer*-class training examples purely by
+  capping's random subsampling, not by an actual data gap. `score_clip` now
+  raises a clear per-clip error for this and `main()`'s multi-clip loop
+  catches it and skips that one clip rather than aborting the whole run
+  (fixed this session after the mocked dry run surfaced exactly this
+  failure mode) — but it means a run can silently score fewer clips than
+  requested; check the "N/M target clip(s) skipped" line every run.
 
 ## Exact commands reference
 
@@ -364,6 +527,10 @@ cd ~/Desktop/ECCV
 source venv/bin/activate                          # every new terminal
 PYTHONPATH=. python scripts/smoke_test_single_clip.py /path/to/clip.avi
 PYTHONPATH=. python scripts/smoke_test_two_clips.py /path/to/target.avi /path/to/reference.avi
+PYTHONPATH=. python scripts/build_semantic_anchor.py <ntu_root> --target-clip <clip.avi> --output anchor.pt
+PYTHONPATH=. python scripts/spike_blind_vs_raw.py <ntu_root> --target-clip <clip1.avi> <clip2.avi> --anchor anchor.pt
+PYTHONPATH=. python scripts/build_pca_basis.py <ntu_root> --from-anchor anchor.pt --output pca_basis.pt
+PYTHONPATH=. python scripts/visualize_steering.py <ntu_root> --target-clip <clip.avi> --anchor anchor.pt --pca-basis pca_basis.pt
 ```
 
 ## File inventory — created or substantively rewritten this session
@@ -381,3 +548,16 @@ Rewritten: `vjepa/decoder.py` (deleted), `vjepa/encoder.py`,
 `pipeline/inference_loop.py`, `data/ntu_rgbd.py`,
 `evaluation/ids.py|scs.py|pcs.py`, `configs/base.yaml`,
 `requirements.txt`, `STATUS.md`.
+
+## File inventory — 2026-07-19 session (items 14-15)
+
+New: `scripts/build_pca_basis.py`, `scripts/visualize_steering.py`.
+
+Rewritten: `scripts/spike_blind_vs_raw.py` (class-balancing cap,
+`train_probes`/`score_clip` split, multi-clip `--target-clip`, per-clip
+skip-on-error), `visualization/pca_overlay.py` (stub -> real),
+`visualization/nn_retrieval.py` (stub -> real).
+
+Not touched (confirmed, per explicit scope): `scripts/build_semantic_anchor.py`,
+`overseer/*.py`, `arms/*.py`, `pipeline/inference_loop.py` (bug found and
+flagged above, fix deferred).
